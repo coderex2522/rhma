@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<nodes_info>
+	<node id="1">
+		<addr>192.168.206.128</addr>
+		<port>23456</port>
+	</node>
+	<node id="2">
+		<addr>192.168.206.129</addr>
+		<port>23456</port>
+	</node>
+</nodes_info>
