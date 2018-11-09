@@ -21,8 +21,10 @@ rhma_transport.o:rhma_transport.c
 rhma_node.o:rhma_node.c 
 	gcc -Wall -g	-c -o $@ $^ 
 
+rhma_task.o:rhma_task.c
+	gcc -Wall -g	-c -o $@ $^
 	
-test:rhma_log.o rhma_config.o rhma_context.o rhma_transport.o rhma_node.o test.o
+test:rhma_log.o rhma_config.o rhma_context.o rhma_transport.o rhma_task.o rhma_node.o test.o
 	gcc -Wall -g $^ -o $@  ${LDFLAGS}
 	rm -rf *.o
 	
