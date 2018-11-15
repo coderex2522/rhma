@@ -1,7 +1,7 @@
 #ifndef RHMA_TASK_H
 #define RHMA_TASK_H
 
-#define RHMA_TASK_SIZE 64
+#define RHMA_TASK_SIZE 128
 
 struct rhma_sge
 {
@@ -29,6 +29,8 @@ struct rhma_task
 
 struct rhma_task* rhma_recv_task_create ( struct rhma_transport* rdma_trans, int size );
 struct rhma_task* rhma_send_task_create ( struct rhma_transport* rdma_trans, struct rhma_msg *msg );
+
+struct rhma_task* rhma_read_task_create ( struct rhma_transport* rdma_trans, int length);
 
 #endif
 

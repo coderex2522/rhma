@@ -7,6 +7,20 @@
  
 struct rhma_node curnode;
 
+static void rhma_wait_connection()
+{
+	int i;
+	INFO_LOG("rhma wait connection start.");
+	for(i=0;i<curnode.config.nets_cnt;i++)
+	{
+		if(i==curnode.config.curnet_id)
+			continue;
+		while(curnode.connect_trans[i]==NULL||
+			curnode.connect_trans[i]->trans_state<RHMA_TRANSPORT_STATE_CONNECTED);
+	}
+	INFO_LOG("rhma wait connection end.");
+}
+
 void rhma_init()
 {
 	int i, err=0;
@@ -39,6 +53,8 @@ void rhma_init()
 							curnode.config.net_infos[i].port);
 	}
 	
+	rhma_wait_connection();
+	/*all connection is established.*/
 	return ;
 error:
 	exit(-1);

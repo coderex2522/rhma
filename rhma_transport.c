@@ -89,9 +89,7 @@ out:
 void rhma_trans_destroy ( struct rhma_device* dev )
 {
 	if ( dev->verbs )
-	{
 		ibv_dealloc_pd ( dev->pd );
-	}
 
 }
 
@@ -106,7 +104,6 @@ static int on_cm_addr_resolved ( struct rdma_cm_event* event, struct rhma_transp
 		ERROR_LOG ( "RDMA resolve route error." );
 		return retval;
 	}
-
 
 	return retval;
 }
@@ -136,32 +133,83 @@ const char* rhma_ibv_wc_opcode_str ( enum ibv_wc_opcode opcode )
 	};
 }
 
+static void rhma_malloc_event_handler ( struct rhma_transport* rdma_trans, struct rhma_msg* msg )
+{
+	struct rhma_mc_res_msg mc_res_msg;
+	struct rhma_msg res_msg;
+	void* alloc_region=NULL;
+	struct ibv_mr* mr;
+	struct rhma_addr *raddr;
+	
+	if ( msg->msg_type==RHMA_MSG_MALLOC_REQUEST )
+	{
+		memcpy ( &mc_res_msg.req_msg, msg->data, sizeof ( struct rhma_mc_req_msg ) );
+		INFO_LOG("req size %d addr %p",mc_res_msg.req_msg.req_size,mc_res_msg.req_msg.raddr);
+		alloc_region=malloc ( 32 );
+		if ( !alloc_region )
+		{
+			ERROR_LOG ( "alloc memory error." );
+			return ;
+		}
+		mr=ibv_reg_mr ( rdma_trans->device->pd, alloc_region,
+		                32, IBV_ACCESS_LOCAL_WRITE|IBV_ACCESS_REMOTE_READ);
+		if ( !mr )
+		{
+			ERROR_LOG ( "ib register memory error." );
+			free ( alloc_region );
+			return ;
+		}
+		INFO_LOG("malloc addr is %p lkey is %ld",mr->addr,mr->lkey);
+		snprintf(mr->addr,32,"welcome beijing");
+		memcpy ( &mc_res_msg.mr, mr, sizeof ( struct ibv_mr ) );
+		res_msg.msg_type=RHMA_MSG_MALLOC_RESPONSE;
+		res_msg.data_size=sizeof ( struct rhma_mc_res_msg );
+		res_msg.data=&mc_res_msg;
+
+		rhma_post_send ( rdma_trans, &res_msg );
+	}
+	if ( msg->msg_type==RHMA_MSG_MALLOC_RESPONSE )
+	{
+		memcpy(&mc_res_msg, msg->data, sizeof(struct rhma_mc_res_msg));
+		raddr=mc_res_msg.req_msg.raddr;
+		memcpy(&raddr->mr, &mc_res_msg.mr, sizeof(struct ibv_mr));
+		raddr->addr=mc_res_msg.mr.addr;
+		INFO_LOG("recv mr addr is %p lkey is %ld",raddr->mr.addr,raddr->mr.lkey);
+	}
+}
 
 static void rhma_wc_success_handler ( struct ibv_wc* wc )
 {
 	struct rhma_transport* rdma_trans;
 	struct rhma_task* task;
 	struct rhma_msg msg;
-	
+
 	task= ( struct rhma_task* ) ( uintptr_t ) wc->wr_id;
 	rdma_trans= task->rdma_trans;
-	if(wc->opcode==IBV_WC_SEND||wc->opcode==IBV_WC_RECV){
+	if ( wc->opcode==IBV_WC_SEND||wc->opcode==IBV_WC_RECV )
+	{
 		msg.msg_type=* ( enum rhma_msg_type* ) task->sge.addr;
 		msg.data_size=* ( int* ) ( task->sge.addr+sizeof ( enum rhma_msg_type ) );
 		msg.data=task->sge.addr+sizeof ( enum rhma_msg_type )+sizeof ( int );
 	}
+	if ( msg.data_size!=0 && wc->opcode==IBV_WC_RECV &&
+	        ( msg.msg_type==RHMA_MSG_MALLOC_REQUEST||
+	          msg.msg_type==RHMA_MSG_MALLOC_RESPONSE ) )
+		rhma_malloc_event_handler ( rdma_trans, &msg );
 
 	switch ( wc->opcode )
 	{
 		case IBV_WC_SEND:
-			INFO_LOG ( "send content is %s", msg.data );
+			INFO_LOG ( "send content" );
 			break;
 		case IBV_WC_RECV:
-			INFO_LOG ( "recv content is %s", msg.data );
+			INFO_LOG ( "recv content" );
 			break;
 		case IBV_WC_RDMA_WRITE:
 			break;
 		case IBV_WC_RDMA_READ:
+			task->type=RHMA_TASK_DONE;
+			INFO_LOG ( "task read done." );
 			break;
 		case IBV_WC_RECV_RDMA_WITH_IMM:
 			break;
@@ -379,7 +427,7 @@ static int on_cm_route_resolved ( struct rdma_cm_event* event, struct rhma_trans
 		ERROR_LOG ( "rdma connect error." );
 		goto cleanqp;
 	}
-	for ( i=0; i<4; i++ )
+	for ( i=0; i<2; i++ )
 	{
 		rhma_post_recv ( rdma_trans );
 	}
@@ -438,6 +486,12 @@ static int on_cm_connect_request ( struct rdma_cm_event* event, struct rhma_tran
 		return -1;
 	}
 	new_trans->trans_state=RHMA_TRANSPORT_STATE_CONNECTING;
+
+	for ( i=0; i<2; i++ )
+	{
+		rhma_post_recv ( new_trans );
+	}
+
 	return retval;
 
 out:
@@ -447,8 +501,7 @@ out:
 
 static int on_cm_established ( struct rdma_cm_event* event, struct rhma_transport* rdma_trans )
 {
-	int i,retval=0;
-	struct rhma_msg msg;
+	int retval=0;
 
 	memcpy ( &rdma_trans->local_addr,
 	         &rdma_trans->cm_id->route.addr.src_sin,
@@ -458,37 +511,37 @@ static int on_cm_established ( struct rdma_cm_event* event, struct rhma_transpor
 	         &rdma_trans->cm_id->route.addr.dst_sin,
 	         sizeof ( rdma_trans->peer_addr ) );
 
-	msg.data_size=32;
-	msg.data=malloc ( msg.data_size );
-	msg.msg_type=RHMA_MSG_NORMAL;
-	if ( rdma_trans->node_id==0 )
-	{
-		for ( i=0; i<4; i++ )
-		{
-			snprintf ( msg.data, msg.data_size, "message content is %d", i );
-			rhma_post_send ( rdma_trans, &msg );
-
-		}
-	}
-	free ( msg.data );
+	rdma_trans->trans_state=RHMA_TRANSPORT_STATE_CONNECTED;
 	return retval;
+}
+
+static void rhma_destroy_source ( struct rhma_transport* rdma_trans )
+{
+
+	if ( rdma_trans->send_region )
+	{
+		ibv_dereg_mr ( rdma_trans->send_region_mr );
+		ibv_dereg_mr ( rdma_trans->recv_region_mr );
+		free ( rdma_trans->send_region );
+	}
+
+	rdma_destroy_qp ( rdma_trans->cm_id );
+	rhma_context_del_event_fd ( rdma_trans->ctx, rdma_trans->rcq->comp_channel->fd );
+	rhma_context_del_event_fd ( rdma_trans->ctx, rdma_trans->event_channel->fd );
 }
 
 static int on_cm_disconnected ( struct rdma_cm_event* event, struct rhma_transport* rdma_trans )
 {
-	int retval=0;
+	rhma_destroy_source ( rdma_trans );
+	return 0;
+}
 
-	ibv_dereg_mr ( rdma_trans->send_region_mr );
-	ibv_dereg_mr ( rdma_trans->recv_region_mr );
-	free ( rdma_trans->send_region );
-	free ( rdma_trans->recv_region );
-
-	rdma_destroy_qp ( rdma_trans->cm_id );
-
-	rhma_context_del_event_fd ( rdma_trans->ctx, rdma_trans->rcq->comp_channel->fd );
-	rhma_context_del_event_fd ( rdma_trans->ctx, rdma_trans->event_channel->fd );
-
-	return retval;
+static int on_cm_error ( struct rdma_cm_event* event, struct rhma_transport* rdma_trans )
+{
+	rhma_destroy_source ( rdma_trans );
+	rdma_trans->ctx->stop=1;
+	rdma_trans->trans_state=RHMA_TRANSPORT_STATE_ERROR;
+	return -1;
 }
 
 static int rhma_handle_ec_event ( struct rdma_cm_event* event )
@@ -518,8 +571,8 @@ static int rhma_handle_ec_event ( struct rdma_cm_event* event )
 			retval=on_cm_disconnected ( event,rdma_trans );
 			break;
 		case RDMA_CM_EVENT_CONNECT_ERROR:
-			rdma_trans->ctx->stop=1;
-			rdma_trans->trans_state=RHMA_TRANSPORT_STATE_ERROR;
+			retval=on_cm_error ( event, rdma_trans );
+			break;
 		default:
 			retval=-1;
 			break;
@@ -591,6 +644,51 @@ cleanec:
 	return retval;
 }
 
+static int rhma_memory_register ( struct rhma_transport* rdma_trans )
+{
+	void* base=malloc ( SEND_REGION_SIZE+RECV_REGION_SIZE );
+	if ( !base )
+	{
+		ERROR_LOG ( "allocate memory error." );
+		goto out;
+	}
+
+	rdma_trans->send_region_used=rdma_trans->recv_region_used=0;
+	rdma_trans->send_region=base;
+	rdma_trans->recv_region=base+SEND_REGION_SIZE;
+
+	rdma_trans->send_region_mr=ibv_reg_mr ( rdma_trans->device->pd, rdma_trans->send_region,
+	                                        SEND_REGION_SIZE,
+	                                        IBV_ACCESS_LOCAL_WRITE);
+	if ( !rdma_trans->send_region_mr )
+	{
+		ERROR_LOG ( "rdma register memory error." );
+		goto out_base;
+	}
+
+	rdma_trans->recv_region_mr=ibv_reg_mr ( rdma_trans->device->pd, rdma_trans->recv_region,
+	                                        RECV_REGION_SIZE,
+	                                        IBV_ACCESS_LOCAL_WRITE );
+	if ( !rdma_trans->recv_region_mr )
+	{
+		ERROR_LOG ( "rdma register memory error." );
+		goto out_send_region_mr;
+	}
+	INFO_LOG ( "send region mr lkey %ld rkey %ld",rdma_trans->send_region_mr->lkey,rdma_trans->send_region_mr->rkey );
+	INFO_LOG ( "recv region mr lkey %ld rkey %ld",rdma_trans->recv_region_mr->lkey,rdma_trans->recv_region_mr->rkey );
+
+	return 0;
+
+out_send_region_mr:
+	ibv_dereg_mr ( rdma_trans->send_region_mr );
+
+out_base:
+	free ( base );
+
+out:
+	return -1;
+}
+
 struct rhma_transport* rhma_transport_create ( struct rhma_context* ctx,
                                                struct rhma_device* dev )
 {
@@ -615,51 +713,13 @@ struct rhma_transport* rhma_transport_create ( struct rhma_context* ctx,
 		goto out;
 	}
 
-	rdma_trans->recv_region_used=0;
-	rdma_trans->recv_region=malloc ( RECV_REGION_SIZE );
-	if ( !rdma_trans->recv_region )
+	err=rhma_memory_register ( rdma_trans );
+	if ( err )
 	{
-		ERROR_LOG ( "allocate memory error." );
 		goto out_event_channel;
 	}
 
-	rdma_trans->recv_region_mr=ibv_reg_mr ( rdma_trans->device->pd, rdma_trans->recv_region,
-	                                        RECV_REGION_SIZE,
-	                                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE );
-	if ( !rdma_trans->recv_region_mr )
-	{
-		ERROR_LOG ( "rdma register memory error." );
-		goto out_recv_region;
-	}
-	INFO_LOG ( "recv region mr lkey %ld rkey %ld",rdma_trans->recv_region_mr->lkey,rdma_trans->recv_region_mr->rkey );
-
-	rdma_trans->send_region_used=0;
-	rdma_trans->send_region=malloc ( SEND_REGION_SIZE );
-	if ( !rdma_trans->send_region )
-	{
-		ERROR_LOG ( "allocate memory error." );
-		goto out_recv_region_mr;
-	}
-
-	rdma_trans->send_region_mr=ibv_reg_mr ( rdma_trans->device->pd, rdma_trans->send_region,
-	                                        SEND_REGION_SIZE,
-	                                        IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE );
-	if ( !rdma_trans->send_region_mr )
-	{
-		ERROR_LOG ( "rdma register memory error." );
-		goto out_send_region;
-	}
-	INFO_LOG ( "send region mr lkey %ld rkey %ld",rdma_trans->send_region_mr->lkey,rdma_trans->send_region_mr->rkey );
-
 	return rdma_trans;
-out_send_region:
-	free ( rdma_trans->send_region );
-
-out_recv_region_mr:
-	ibv_dereg_mr ( rdma_trans->recv_region_mr );
-
-out_recv_region:
-	free ( rdma_trans->recv_region );
 
 out_event_channel:
 	rhma_context_del_event_fd ( rdma_trans->ctx, rdma_trans->event_channel->fd );
@@ -855,6 +915,49 @@ int rhma_post_send ( struct rhma_transport* rdma_trans, struct rhma_msg* msg )
 }
 
 
+int rhma_rdma_read ( struct rhma_transport* rdma_trans, struct ibv_mr *mr, void *local_addr, int length )
+{
+	struct rhma_task* read_task;
+	struct ibv_send_wr send_wr,*bad_wr=NULL;
+	struct ibv_sge sge;
+	int err=0;
+
+	read_task= rhma_read_task_create ( rdma_trans, length );
+	if ( !read_task )
+	{
+		ERROR_LOG ( "create task error." );
+		goto error;
+	}
+
+	memset ( &send_wr, 0, sizeof ( struct ibv_send_wr ) );
+
+	send_wr.wr_id= ( uintptr_t ) read_task;
+	send_wr.opcode=IBV_WR_RDMA_READ;
+	send_wr.sg_list=&sge;
+	send_wr.num_sge=1;
+	send_wr.send_flags=IBV_SEND_SIGNALED;
+	send_wr.wr.rdma.remote_addr= ( uintptr_t ) mr->addr;
+	send_wr.wr.rdma.rkey=mr->rkey;
+
+	sge.addr= ( uintptr_t ) read_task->sge.addr;
+	sge.length=read_task->sge.length;
+	sge.lkey=read_task->sge.lkey;
+
+	err=ibv_post_send ( rdma_trans->qp, &send_wr, &bad_wr );
+	if ( err )
+	{
+		ERROR_LOG ( "ibv_post_send error" );
+		goto error;
+	}
+
+	while ( read_task->type!=RHMA_TASK_DONE );
+	memcpy(local_addr, read_task->sge.addr, read_task->sge.length);
+	INFO_LOG ( "read content is %s",local_addr );
+
+	return 0;
+error:
+	return -1;
+}
 
 
 

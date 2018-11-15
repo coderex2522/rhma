@@ -14,14 +14,14 @@ struct rhma_task* rhma_recv_task_create ( struct rhma_transport* rdma_trans, int
 		ERROR_LOG("alloc memory error.");
 		return NULL;
 	}
-
-	recv_task->type=RHMA_TASK_INIT;
+	
+	recv_task->type=RHMA_TASK_RECV;
 	recv_task->sge.addr=rdma_trans->recv_region+rdma_trans->recv_region_used*RHMA_TASK_SIZE;
 	recv_task->sge.length=RHMA_TASK_SIZE;
 	recv_task->sge.lkey=rdma_trans->recv_region_mr->lkey;
 	recv_task->rdma_trans=rdma_trans;
 
-	rdma_trans->recv_region_used=(rdma_trans->recv_region_used+1)%4;
+	rdma_trans->recv_region_used=(rdma_trans->recv_region_used+1)%2;
 
 	return recv_task;
 }
@@ -36,12 +36,15 @@ struct rhma_task* rhma_send_task_create ( struct rhma_transport* rdma_trans, str
 		return NULL;
 	}
 
-	send_task->type=RHMA_TASK_INIT;
-	send_task->sge.addr=rdma_trans->send_region+rdma_trans->send_region_used*RHMA_TASK_SIZE;
+	send_task->type=RHMA_TASK_SEND;
 	send_task->sge.length=sizeof(enum rhma_msg_type)+sizeof(int)+msg->data_size;
+	if(rdma_trans->send_region_used+send_task->sge.length>=SEND_REGION_SIZE)
+		rdma_trans->send_region_used=0;
+	send_task->sge.addr=rdma_trans->send_region+rdma_trans->send_region_used;
 	send_task->sge.lkey=rdma_trans->send_region_mr->lkey;
 	send_task->rdma_trans=rdma_trans;
-	rdma_trans->send_region_used=(rdma_trans->send_region_used+1)%4;
+	
+	rdma_trans->send_region_used+=send_task->sge.length;
 	
 	/*use msg build send task*/
 	memcpy(send_task->sge.addr, &msg->msg_type, sizeof(enum rhma_msg_type));
@@ -52,4 +55,26 @@ struct rhma_task* rhma_send_task_create ( struct rhma_transport* rdma_trans, str
 
 }
 
+struct rhma_task* rhma_read_task_create(struct rhma_transport * rdma_trans, int length)
+{
+	struct rhma_task *task;
+	
+	task=(struct rhma_task*)malloc(sizeof(struct rhma_task));
+	if(!task){
+		ERROR_LOG("allocate memory error.");
+		return NULL;
+	}
+	
+	task->type=RHMA_TASK_READ;
+	if(rdma_trans->send_region_used+length>=SEND_REGION_SIZE)
+		rdma_trans->send_region_used=0;
+	
+	task->sge.addr=rdma_trans->send_region+rdma_trans->send_region_used;
+	task->sge.length=length;
+	task->sge.lkey=rdma_trans->send_region_mr->lkey;
+	task->rdma_trans=rdma_trans;
 
+	rdma_trans->send_region_used+=length;
+	
+	return task;
+}

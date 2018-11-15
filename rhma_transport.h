@@ -13,7 +13,8 @@
 #define CQE_ALLOC_SIZE 20
 
 #define RECV_REGION_SIZE 256
-#define SEND_REGION_SIZE 256
+#define SEND_REGION_SIZE 512
+#define REMOTE_REGION_SIZE 256
 
 #define min(a,b) (a>b?b:a)
 
@@ -64,6 +65,7 @@ struct rhma_transport{
 	void *send_region;
 	int send_region_used;
 	struct ibv_mr *send_region_mr;
+
 };
 
 int rhma_trans_init(struct rhma_device *dev);
@@ -78,4 +80,5 @@ int rhma_transport_connect(struct rhma_transport *rdma_trans, const char *url, i
 int rhma_post_recv ( struct rhma_transport* rdma_trans );
 
 int rhma_post_send(struct rhma_transport *rdma_trans, struct rhma_msg *msg);
+int rhma_rdma_read ( struct rhma_transport* rdma_trans, struct ibv_mr *mr, void* local_addr, int length );
 #endif
