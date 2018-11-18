@@ -1,5 +1,6 @@
 #include "rhma.h"
 #include "rhma_log.h"
+#include "rhma_hash.h"
 #include "rhma_config.h"
 #include "rhma_context.h"
 #include "rhma_transport.h"
@@ -16,12 +17,14 @@ struct rhma_task* rhma_recv_task_create ( struct rhma_transport* rdma_trans, int
 	}
 	
 	recv_task->type=RHMA_TASK_RECV;
-	recv_task->sge.addr=rdma_trans->recv_region+rdma_trans->recv_region_used*RHMA_TASK_SIZE;
-	recv_task->sge.length=RHMA_TASK_SIZE;
+	if(rdma_trans->recv_region_used+size>=RECV_REGION_SIZE)
+		rdma_trans->recv_region_used=0;
+	recv_task->sge.addr=rdma_trans->recv_region+rdma_trans->recv_region_used;
 	recv_task->sge.lkey=rdma_trans->recv_region_mr->lkey;
+	recv_task->sge.length=size;
 	recv_task->rdma_trans=rdma_trans;
 
-	rdma_trans->recv_region_used=(rdma_trans->recv_region_used+1)%2;
+	rdma_trans->recv_region_used+=size;
 
 	return recv_task;
 }
@@ -43,7 +46,7 @@ struct rhma_task* rhma_send_task_create ( struct rhma_transport* rdma_trans, str
 	send_task->sge.addr=rdma_trans->send_region+rdma_trans->send_region_used;
 	send_task->sge.lkey=rdma_trans->send_region_mr->lkey;
 	send_task->rdma_trans=rdma_trans;
-	
+	INFO_LOG("send task sge length is %d",send_task->sge.length);
 	rdma_trans->send_region_used+=send_task->sge.length;
 	
 	/*use msg build send task*/

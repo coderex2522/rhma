@@ -16,6 +16,8 @@
 #define SEND_REGION_SIZE 512
 #define REMOTE_REGION_SIZE 256
 
+#define SINGLE_RECV_SIZE 128
+
 #define min(a,b) (a>b?b:a)
 
 enum rhma_transport_state {
@@ -66,6 +68,13 @@ struct rhma_transport{
 	int send_region_used;
 	struct ibv_mr *send_region_mr;
 
+	int fd_test_send_recv;
+};
+
+struct rhma_mr{
+	void *addr;
+	struct ibv_mr *mr;
+	struct list_head mr_entry;
 };
 
 int rhma_trans_init(struct rhma_device *dev);
@@ -77,8 +86,7 @@ struct rhma_transport *rhma_transport_create(struct rhma_context *ctx,
 int rhma_transport_listen(struct rhma_transport *rdma_trans, int listen_port);
 int rhma_transport_connect(struct rhma_transport *rdma_trans, const char *url, int port);
 
-int rhma_post_recv ( struct rhma_transport* rdma_trans );
-
+int rhma_post_recv ( struct rhma_transport* rdma_trans, int size );
 int rhma_post_send(struct rhma_transport *rdma_trans, struct rhma_msg *msg);
 int rhma_rdma_read ( struct rhma_transport* rdma_trans, struct ibv_mr *mr, void* local_addr, int length );
 #endif

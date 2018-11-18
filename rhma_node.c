@@ -1,5 +1,6 @@
 #include "rhma.h"
 #include "rhma_log.h"
+#include "rhma_hash.h"
 #include "rhma_config.h"
 #include "rhma_context.h"
 #include "rhma_transport.h"
@@ -24,6 +25,7 @@ static void rhma_wait_connection()
 void rhma_init()
 {
 	int i, err=0;
+	rhma_hash_init();
 	rhma_config_init(&curnode.config);
 	rhma_context_init(&curnode.ctx);
 	rhma_trans_init(&curnode.dev);
@@ -55,6 +57,10 @@ void rhma_init()
 	
 	rhma_wait_connection();
 	/*all connection is established.*/
+
+	/*init mr list*/
+	INIT_LIST_HEAD(&curnode.used_mr_list);
+	INIT_LIST_HEAD(&curnode.free_mr_list);
 	return ;
 error:
 	exit(-1);

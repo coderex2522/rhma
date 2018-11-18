@@ -9,6 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 #include <sys/timerfd.h>
@@ -29,7 +30,10 @@ enum rhma_msg_type{
 	RHMA_MSG_INIT,
 	RHMA_MSG_NORMAL,
 	RHMA_MSG_MALLOC_REQUEST,
-	RHMA_MSG_MALLOC_RESPONSE
+	RHMA_MSG_MALLOC_RESPONSE,
+	RHMA_MSG_MALLOC_ERROR,
+	RHMA_MSG_FREE,
+	RHMA_MSG_TEST
 };
 
 struct rhma_msg{

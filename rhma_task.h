@@ -1,8 +1,6 @@
 #ifndef RHMA_TASK_H
 #define RHMA_TASK_H
 
-#define RHMA_TASK_SIZE 128
-
 struct rhma_sge
 {
 	void	*addr;

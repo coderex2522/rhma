@@ -13,9 +13,14 @@ int main(int argc,char *argv[])
 	snprintf(str,32,"hello world");
 	rhma_init();
 	raddr=rhma_malloc(32);
-	if(raddr.addr!=NULL){
-		rhma_read(raddr, str, 32);
-	}
+	sleep(5);
+	rhma_free(raddr);
+
+	sleep(10);
+	raddr=rhma_malloc(32);
+	sleep(5);
+	rhma_free(raddr);
+	
 	rhma_destroy();
 	return 0;
 }

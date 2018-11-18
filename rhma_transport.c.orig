@@ -142,13 +142,12 @@ static void rhma_malloc_request_handler ( struct rhma_transport* rdma_trans, str
 	struct rhma_msg res_msg;
 
 	memcpy ( &mc_res_msg.req_msg, msg->data, sizeof ( struct rhma_mc_req_msg ) );
-	INFO_LOG ( "req size %d",mc_res_msg.req_msg.req_size );
+	INFO_LOG ( "RHMA_MSG_MALLOC_REQUEST req size %d addr %p",mc_res_msg.req_msg.req_size,mc_res_msg.req_msg.raddr );
 	/*first step:search free mr list*/
-	if ( !list_empty ( &curnode.free_mr_list ) )
+	if(!list_empty(&curnode.free_mr_list))
 	{
-		INFO_LOG("find mr in free mr list");
-		rmr=list_entry ( curnode.free_mr_list.next, struct rhma_mr, mr_entry );
-		list_del ( &rmr->mr_entry );
+		rmr=list_entry(curnode.free_mr_list.next, struct rhma_mr, mr_entry);
+		list_del(&rmr->mr_entry);
 		goto normal_res_msg;
 	}
 
@@ -156,10 +155,10 @@ static void rhma_malloc_request_handler ( struct rhma_transport* rdma_trans, str
 	rmr=malloc ( sizeof ( struct rhma_mr ) );
 	if ( !rmr )
 	{
-		ERROR_LOG ( "alloc memory error." );
+		ERROR_LOG ( "alloc memory error." )
 		goto req_error;
 	}
-
+	
 	rmr->addr=malloc ( mc_res_msg.req_msg.req_size );
 	if ( !rmr->addr )
 	{
@@ -177,8 +176,8 @@ static void rhma_malloc_request_handler ( struct rhma_transport* rdma_trans, str
 
 normal_res_msg:
 	INFO_LOG ( "malloc addr %p lkey %ld",rmr->mr->addr,rmr->mr->lkey );
-	snprintf ( rmr->addr, mc_res_msg.req_msg.req_size,"welcome beijing %p",rmr );
-
+	snprintf ( rmr->addr, mc_res_msg.req_msg.req_size,"welcome beijing %p",rmr);
+	
 	memcpy ( &mc_res_msg.mr, rmr->mr, sizeof ( struct ibv_mr ) );
 	res_msg.msg_type=RHMA_MSG_MALLOC_RESPONSE;
 	res_msg.data_size=sizeof ( struct rhma_mc_res_msg );
@@ -194,7 +193,7 @@ clean_rmr:
 req_error:
 	/*transmit a message of RHMA_MSG_MALLOC_ERROR*/
 	res_msg.msg_type=RHMA_MSG_MALLOC_ERROR;
-	res_msg.data_size=sizeof ( struct rhma_mc_res_msg );
+	res_msg.data_size=sizeof(struct rhma_mc_res_msg);
 	res_msg.data=&mc_res_msg;
 
 	rhma_post_send ( rdma_trans, &res_msg );
@@ -205,13 +204,15 @@ req_error:
 static void rhma_malloc_event_handler ( struct rhma_transport* rdma_trans, struct rhma_msg* msg )
 {
 	struct rhma_mc_res_msg mc_res_msg;
+	struct rhma_msg res_msg;
+	void* alloc_region=NULL;
+	struct ibv_mr* mr;
 	struct rhma_addr* raddr;
+	struct rhma_mr* rmr;
 
 	if ( msg->msg_type==RHMA_MSG_MALLOC_REQUEST )
-	{
-		rhma_malloc_request_handler ( rdma_trans, msg );
-	}
-
+		rhma_malloc_request_handler(rdma_trans, msg);
+	
 	if ( msg->msg_type==RHMA_MSG_MALLOC_RESPONSE )
 	{
 		memcpy ( &mc_res_msg, msg->data, sizeof ( struct rhma_mc_res_msg ) );
@@ -220,8 +221,8 @@ static void rhma_malloc_event_handler ( struct rhma_transport* rdma_trans, struc
 		raddr->addr=mc_res_msg.mr.addr;
 		INFO_LOG ( "response mr addr %p lkey %ld",raddr->mr.addr,raddr->mr.lkey );
 	}
-
-	if ( msg->msg_type==RHMA_MSG_MALLOC_ERROR )
+	
+	if(msg->msg_type==RHMA_MSG_MALLOC_ERROR)
 	{
 		memcpy ( &mc_res_msg, msg->data, sizeof ( struct rhma_mc_res_msg ) );
 		raddr=mc_res_msg.req_msg.raddr;
@@ -230,20 +231,21 @@ static void rhma_malloc_event_handler ( struct rhma_transport* rdma_trans, struc
 	}
 }
 
-static void rhma_free_event_handler ( struct rhma_transport* rdma_trans, struct rhma_msg* msg )
+static void rhma_free_event_handler(struct rhma_transport* rdma_trans, struct rhma_msg* msg)
 {
-	struct ibv_mr* mr;
-	struct rhma_mr* rmr;
-
+	struct ibv_mr *mr;
+	struct rhma_mr *rmr;
+	
 	mr=msg->data;
-	list_for_each_entry ( rmr, &curnode.used_mr_list, mr_entry )
+
+	list_for_each_entry(rmr, &curnode.used_mr_list, mr_entry)
 	{
-		if ( rmr->mr->addr==mr->addr && rmr->mr->length==mr->length )
+		if(rmr->mr.addr==mr->addr&&rmr->mr.length==mr->length)
 		{
-			INFO_LOG ( "%s start",__func__ );
-			list_del ( &rmr->mr_entry );
-			list_add ( &rmr->mr_entry, &curnode.free_mr_list );
-			INFO_LOG ( "%s end",__func__ );
+			INFO_LOG("%s start",__func__);
+			list_del(&rmr->mr_entry);
+			list_add(&rmr->mr_entry, &curnode.free_mr_list);
+			INFO_LOG("%s end",__func__);
 			break;
 		}
 	}
@@ -263,26 +265,19 @@ static void rhma_wc_success_handler ( struct ibv_wc* wc )
 		msg.data_size=* ( int* ) ( task->sge.addr+sizeof ( enum rhma_msg_type ) );
 		msg.data=task->sge.addr+sizeof ( enum rhma_msg_type )+sizeof ( int );
 	}
-	
 	/*about malloc msg handle*/
 	if ( msg.data_size!=0 && wc->opcode==IBV_WC_RECV &&
 	        ( msg.msg_type==RHMA_MSG_MALLOC_REQUEST||
-	          msg.msg_type==RHMA_MSG_MALLOC_RESPONSE||
-	          msg.msg_type==RHMA_MSG_MALLOC_ERROR ) )
-	{
+	          msg.msg_type==RHMA_MSG_MALLOC_RESPONSE|| 
+	          msg.msg_type==RHMA_MSG_MALLOC_ERROR ))
 		rhma_malloc_event_handler ( rdma_trans, &msg );
-	}
-
+	
 	if ( msg.msg_type==RHMA_MSG_TEST )
-	{
 		INFO_LOG ( "msg content is %s",msg.data );
-	}
 
-	if ( msg.data_size!=0 && wc->opcode==IBV_WC_RECV && msg.msg_type==RHMA_MSG_FREE )
-	{
-		rhma_free_event_handler ( rdma_trans, &msg );
-	}
-
+	if(msg.data_size!=0 && wc->opcode==IBV_WC_RECV && msg.msg_type==RHMA_MSG_FREE)
+		rhma_free_event_handler(rdma_trans, &msg);
+	
 	switch ( wc->opcode )
 	{
 		case IBV_WC_SEND:
